@@ -74,9 +74,9 @@ load_existing_config() {
     if [ -f "$CONFIG_FILE" ]; then
         print_info "Found existing configuration"
         source "$CONFIG_FILE"
-        EXISTING_CONFIG=true
+        EXISTING_CONFIG="yes"
     else
-        EXISTING_CONFIG=false
+        EXISTING_CONFIG="no"
     fi
 }
 
@@ -116,7 +116,7 @@ configure_ssl_option() {
             SSL_EMAIL=${NEW_SSL_EMAIL:-$SSL_EMAIL}
         else
             read -p "Email for Let's Encrypt notifications: " SSL_EMAIL
-            while [ -z "$SSL_EMAIL" ]; then
+            while [ -z "$SSL_EMAIL" ]; do
                 print_warning "Email cannot be empty for Let's Encrypt"
                 read -p "Email for Let's Encrypt notifications: " SSL_EMAIL
             done
@@ -142,7 +142,7 @@ gather_config() {
     # Try to load existing configuration
     load_existing_config
     
-    if [ "$EXISTING_CONFIG" = true ]; then
+    if [ "$EXISTING_CONFIG" = "yes" ]; then
         print_success "Existing deployment detected!"
         echo
         echo "Previous configuration:"
@@ -183,7 +183,7 @@ gather_config() {
         DOMAIN_NAME=${NEW_DOMAIN_NAME:-$DOMAIN_NAME}
     else
         read -p "Enter your domain name (e.g., school.com): " DOMAIN_NAME
-        while [ -z "$DOMAIN_NAME" ]; then
+        while [ -z "$DOMAIN_NAME" ]; do
             print_warning "Domain name cannot be empty"
             read -p "Enter your domain name: " DOMAIN_NAME
         done
@@ -197,7 +197,7 @@ gather_config() {
         DOCKER_USERNAME=${NEW_DOCKER_USERNAME:-$DOCKER_USERNAME}
     else
         read -p "Docker Hub username: " DOCKER_USERNAME
-        while [ -z "$DOCKER_USERNAME" ]; then
+        while [ -z "$DOCKER_USERNAME" ]; do
             print_warning "Docker Hub username cannot be empty"
             read -p "Docker Hub username: " DOCKER_USERNAME
         done
@@ -221,19 +221,33 @@ gather_config() {
     fi
     
     # Create deployer user
-    if [ "$EXISTING_CONFIG" != true ]; then
+    if [ "$EXISTING_CONFIG" != "yes" ]; then
         read -p "Create a dedicated 'deployer' user? (recommended) [Y/n]: " CREATE_USER
         CREATE_USER=${CREATE_USER:-Y}
     fi
     
     # Setup firewall
-    if [ "$EXISTING_CONFIG" != true ]; then
+    if [ "$EXISTING_CONFIG" != "yes" ]; then
         read -p "Configure UFW firewall? (recommended) [Y/n]: " SETUP_FIREWALL
         SETUP_FIREWALL=${SETUP_FIREWALL:-Y}
     fi
     
     # SSL Configuration
-    configure_ssl_option
+    if [ "$EXISTING_CONFIG" = "yes" ] && [ -n "$SETUP_SSL" ]; then
+        echo
+        print_info "SSL Certificate Configuration"
+        echo "Current SSL setup: $SETUP_SSL"
+        read -p "Keep existing SSL configuration? [Y/n]: " KEEP_SSL
+        KEEP_SSL=${KEEP_SSL:-Y}
+        
+        if [[ "$KEEP_SSL" =~ ^[Yy]$ ]]; then
+            print_info "Keeping existing SSL configuration"
+        else
+            configure_ssl_option
+        fi
+    else
+        configure_ssl_option
+    fi
     
     print_header "Configuration Summary"
     echo "Domain: $DOMAIN_NAME"
@@ -333,7 +347,6 @@ clone_repository() {
         git pull
     else
         print_info "Cloning from GitHub..."
-        # Replace with your actual repo URL
         read -p "Enter your repository URL: " REPO_URL
         git clone $REPO_URL .
     fi
@@ -401,11 +414,11 @@ setup_letsencrypt() {
         print_success "Let's Encrypt certificates installed"
         
         # Setup auto-renewal with hook to copy certs
-        cat > /tmp/renew-hook.sh << 'HOOKEOF'
+        cat > /tmp/renew-hook.sh << HOOKEOF
 #!/bin/bash
 cp /etc/letsencrypt/live/$DOMAIN_NAME/fullchain.pem $APP_DIR/nginx/ssl/
 cp /etc/letsencrypt/live/$DOMAIN_NAME/privkey.pem $APP_DIR/nginx/ssl/
-docker exec asfa-nginx-1 nginx -s reload
+docker exec asfa-nginx-1 nginx -s reload 2>/dev/null || true
 HOOKEOF
         
         sudo mv /tmp/renew-hook.sh /etc/letsencrypt/renewal-hooks/post/copy-certs.sh
@@ -589,7 +602,7 @@ EOF
     echo
     echo "  ${YELLOW}⚠ REQUIRED:${NC}"
     echo "    - DATABASE_URL (PostgreSQL connection string)"
-    echo "    - EMAIL_HOST_USER & EMAIL_HOST_PASSWORD"
+    echo "    - EMAIL_HOST_PASSWORD (Resend API key)"
     echo "    - Cloudflare R2 credentials (all fields)"
     echo
     echo "  ${CYAN}○ OPTIONAL:${NC}"
