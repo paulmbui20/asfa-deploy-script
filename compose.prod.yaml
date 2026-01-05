@@ -46,7 +46,7 @@ services:
     image: acerschoolapp/acerschoolfinanceapp:latest
     restart: unless-stopped
     command: >
-      celery -A esc worker --loglevel=info --concurrency=4 --prefetch-multiplier=1
+      celery -A afinance worker --loglevel=info --concurrency=1 --prefetch-multiplier=1
     env_file:
       - .env.docker
     depends_on:
