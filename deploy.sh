@@ -343,7 +343,7 @@ clone_repository() {
         git pull
     else
         print_info "Cloning from GitHub..."
-        git clone https://github.com/andreas-tuko/asfa-compose-prod.git .
+        git clone https://github.com/paulmbui20/asfa-deploy-script.git.
     fi
     
     print_success "Repository cloned/updated"
@@ -755,7 +755,7 @@ create_management_scripts() {
 set -e
 cd $(dirname "$0")
 echo "Pulling latest image..."
-docker pull andreastuko/asfa:latest
+docker pull acerschoolapp/acerschoolfinanceapp:latest
 echo "Restarting services..."
 docker compose -f compose.prod.yaml down
 docker compose -f compose.prod.yaml up -d
@@ -794,7 +794,7 @@ start_application() {
     print_header "Starting Application"
     
     cd $APP_DIR
-    docker pull andreastuko/asfa:latest
+    docker pull acerschoolapp/acerschoolfinanceapp:latest
     docker compose -f compose.prod.yaml up -d
     
     print_info "Waiting for services..."
