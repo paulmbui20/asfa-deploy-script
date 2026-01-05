@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# ESC Django Application - Automated Deployment Script
-# This script automates the complete deployment of the ESC application on a fresh VPS
+# ASFA Django Application - Automated Deployment Script
+# This script automates the complete deployment of the ASFA application on a fresh VPS
 
 set -e
 
@@ -135,7 +135,7 @@ gather_config() {
     print_header "Configuration Setup"
     
     # Set default app directory first
-    DEFAULT_APP_DIR="/opt/apps/esc"
+    DEFAULT_APP_DIR="/opt/apps/asfa"
     
     # Try to load existing configuration
     load_existing_config
@@ -343,7 +343,7 @@ clone_repository() {
         git pull
     else
         print_info "Cloning from GitHub..."
-        git clone https://github.com/andreas-tuko/esc-compose-prod.git .
+        git clone https://github.com/andreas-tuko/asfa-compose-prod.git .
     fi
     
     print_success "Repository cloned/updated"
@@ -482,7 +482,7 @@ install_nginx() {
     fi
     
     # Enable site
-    sudo ln -sf /etc/nginx/sites-available/esc /etc/nginx/sites-enabled/
+    sudo ln -sf /etc/nginx/sites-available/asfa /etc/nginx/sites-enabled/
     sudo rm -f /etc/nginx/sites-enabled/default
     
     # Test configuration
@@ -540,7 +540,7 @@ setup_letsencrypt_ssl() {
 create_nginx_config_with_ssl() {
     print_info "Creating Nginx configuration with Let's Encrypt SSL..."
     
-    sudo tee /etc/nginx/sites-available/esc > /dev/null << EOF
+    sudo tee /etc/nginx/sites-available/asfa > /dev/null << EOF
 upstream django_app {
     server 127.0.0.1:8000;
     keepalive 64;
@@ -593,8 +593,8 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
     # Logging
-    access_log /var/log/nginx/esc_access.log;
-    error_log /var/log/nginx/esc_error.log;
+    access_log /var/log/nginx/asfa_access.log;
+    error_log /var/log/nginx/asfa_error.log;
 
     # Client body size limit
     client_max_body_size 100M;
@@ -631,7 +631,7 @@ EOF
 create_nginx_config_http_only() {
     print_info "Creating Nginx configuration (HTTP only for Cloudflare)..."
     
-    sudo tee /etc/nginx/sites-available/esc > /dev/null << EOF
+    sudo tee /etc/nginx/sites-available/asfa > /dev/null << EOF
 upstream django_app {
     server 127.0.0.1:8000;
     keepalive 64;
@@ -648,8 +648,8 @@ server {
     add_header X-XSS-Protection "1; mode=block" always;
 
     # Logging
-    access_log /var/log/nginx/esc_access.log;
-    error_log /var/log/nginx/esc_error.log;
+    access_log /var/log/nginx/asfa_access.log;
+    error_log /var/log/nginx/asfa_error.log;
 
     # Client body size limit
     client_max_body_size 100M;
@@ -704,9 +704,9 @@ EOF
 setup_systemd() {
     print_header "Setting Up Systemd Service"
     
-    sudo tee /etc/systemd/system/esc.service > /dev/null << EOF
+    sudo tee /etc/systemd/system/asfa.service > /dev/null << EOF
 [Unit]
-Description=ESC Django Application
+Dasfaription=ESC Django Application
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target
@@ -725,7 +725,7 @@ WantedBy=multi-user.target
 EOF
     
     sudo systemctl daemon-reload
-    sudo systemctl enable esc.service
+    sudo systemctl enable asfa.service
     
     print_success "Systemd service created and enabled"
 }
@@ -755,7 +755,7 @@ create_management_scripts() {
 set -e
 cd $(dirname "$0")
 echo "Pulling latest image..."
-docker pull andreastuko/esc:latest
+docker pull andreastuko/asfa:latest
 echo "Restarting services..."
 docker compose -f compose.prod.yaml down
 docker compose -f compose.prod.yaml up -d
@@ -794,7 +794,7 @@ start_application() {
     print_header "Starting Application"
     
     cd $APP_DIR
-    docker pull andreastuko/esc:latest
+    docker pull andreastuko/asfa:latest
     docker compose -f compose.prod.yaml up -d
     
     print_info "Waiting for services..."
