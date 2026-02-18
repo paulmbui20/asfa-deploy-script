@@ -202,6 +202,7 @@ gather_config() {
             done
             CREATE_USER="n"
             SETUP_FIREWALL="n"
+            REUSE_CONFIG=true   # skip overwriting compose/Caddyfile on re-deploy
             return 0
         fi
         print_info "Reconfiguring..."
@@ -856,12 +857,36 @@ docker compose -f compose.prod.yaml exec "$SERVICE" bash
 SCRIPT
     chmod +x "$APP_DIR/shell.sh"
 
+    # diagnose.sh — full crash report for any failing container
+    cat > "$APP_DIR/diagnose.sh" << 'SCRIPT'
+#!/bin/bash
+# Usage: ./diagnose.sh [service]   default: web
+# Prints last 200 log lines + inspect output for a failing container
+cd "$(dirname "$0")"
+SERVICE=${1:-web}
+CONTAINER="asfa_${SERVICE}"
+echo "=========================================="
+echo " Diagnose: $CONTAINER"
+echo "=========================================="
+echo ""
+echo "--- Status ---"
+docker inspect --format 'State: {{.State.Status}}  ExitCode: {{.State.ExitCode}}  Error: {{.State.Error}}' "$CONTAINER" 2>/dev/null || echo "(container not found)"
+echo ""
+echo "--- Last 200 log lines ---"
+docker logs --tail 200 "$CONTAINER" 2>&1
+echo ""
+echo "--- Full inspect (State section) ---"
+docker inspect "$CONTAINER" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d[0]['State'], indent=2))" 2>/dev/null || true
+SCRIPT
+    chmod +x "$APP_DIR/diagnose.sh"
+
     print_success "Management scripts created:"
     print_info "  ./deploy.sh          — pull & redeploy"
     print_info "  ./logs.sh [service]  — tail logs"
     print_info "  ./status.sh          — status + cert info"
     print_info "  ./caddy-reload.sh    — hot-reload Caddyfile"
     print_info "  ./shell.sh [service] — open shell in container"
+    print_info "  ./diagnose.sh [svc]  — full crash report for a failing container"
 }
 
 # ---------------------------------------------------------------------------
@@ -928,8 +953,14 @@ main() {
     setup_app_directory
     clone_repository
     docker_login
-    write_caddyfile          # generates caddy/Caddyfile
-    write_compose_file       # generates compose.prod.yaml with Caddy service
+    # Only regenerate Caddyfile and compose.prod.yaml on a fresh install.
+    # On re-deploys (REUSE_CONFIG=true) we keep whatever the user has on disk.
+    if [ "${REUSE_CONFIG:-false}" != "true" ]; then
+        write_caddyfile       # generates caddy/Caddyfile
+        write_compose_file    # generates compose.prod.yaml with Caddy service
+    else
+        print_info "Re-deploy: keeping existing caddy/Caddyfile and compose.prod.yaml"
+    fi
     setup_env_file
     setup_systemd
     setup_firewall
