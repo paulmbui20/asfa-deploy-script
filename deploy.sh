@@ -343,7 +343,7 @@ clone_repository() {
         git pull
     else
         print_info "Cloning from GitHub..."
-        git clone https://github.com/paulmbui20/asfa-deploy-script.git.
+        git clone https://github.com/paulmbui20/asfa-deploy-script.git .
     fi
     
     print_success "Repository cloned/updated"
