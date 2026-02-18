@@ -1,0 +1,72 @@
+# =============================================================
+# Caddyfile — Cloudflare proxy mode
+# Caddy listens on HTTP only; Cloudflare terminates TLS.
+# Cloudflare dashboard → SSL/TLS → set to "Flexible"
+# =============================================================
+# Reload without downtime:
+#   docker compose -f compose.prod.yaml exec caddy caddy reload --config /etc/caddy/Caddyfile
+# Validate:
+#   docker compose -f compose.prod.yaml exec caddy caddy validate --config /etc/caddy/Caddyfile
+# =============================================================
+
+:80 {
+
+    # ── Logging ────────────────────────────────────────────────────────────
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size     100mb
+            roll_keep     5
+            roll_keep_for 720h   # 30 days
+        }
+        format json
+        level  INFO
+    }
+
+    # ── Compression ────────────────────────────────────────────────────────
+    encode zstd gzip
+
+    # ── Security headers ───────────────────────────────────────────────────
+    header {
+        X-Frame-Options        "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection       "1; mode=block"
+        Referrer-Policy        "strict-origin-when-cross-origin"
+        Permissions-Policy     "geolocation=(), microphone=(), camera=()"
+        -Server                # hide Caddy version
+    }
+
+    # ── Health check (no auth, no logging) ─────────────────────────────────
+    handle /health/ {
+        reverse_proxy web:8000 {
+            header_up Host            {host}
+            header_up X-Real-IP       {http.request.header.CF-Connecting-IP}
+            header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+        }
+        log {
+            output discard
+        }
+    }
+
+    # ── Main reverse proxy ─────────────────────────────────────────────────
+    handle {
+        reverse_proxy web:8000 {
+            # Restore real visitor IP from Cloudflare header
+            header_up Host              {host}
+            header_up X-Real-IP         {http.request.header.CF-Connecting-IP}
+            header_up X-Forwarded-For   {http.request.header.CF-Connecting-IP}
+            header_up X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}
+
+            # WebSocket support
+            header_up Connection {http.request.header.Connection}
+            header_up Upgrade    {http.request.header.Upgrade}
+
+            # Timeouts — generous for long Django requests / file uploads
+            transport http {
+                dial_timeout            10s
+                response_header_timeout 600s
+                read_timeout            600s
+                write_timeout           600s
+            }
+        }
+    }
+}
