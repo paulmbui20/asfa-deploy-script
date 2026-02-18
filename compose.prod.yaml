@@ -1,12 +1,38 @@
+# docker pull acerschoolapp/acerschoolfinanceapp:latest && docker compose -f compose.prod.yaml up -d
+
 services:
+
+  caddy:
+    image: caddy:2-alpine          # latest stable Caddy on Alpine — smallest footprint
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"             # HTTP/3 (QUIC)
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data           # TLS certs & ACME state (persisted)
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    depends_on:
+      web:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    # Debugging:
+    #   logs:       docker compose -f compose.prod.yaml logs -f caddy
+    #   hot-reload: docker compose -f compose.prod.yaml exec caddy caddy reload --config /etc/caddy/Caddyfile
+    #   validate:   docker compose -f compose.prod.yaml exec caddy caddy validate --config /etc/caddy/Caddyfile
+    #   list certs: docker compose -f compose.prod.yaml exec caddy caddy list-certificates
+
   redis:
     image: redis:8-alpine3.21
     restart: unless-stopped
-    command: [ "redis-server", "--appendonly", "yes" ]
+    command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 3s
       retries: 3
@@ -22,14 +48,13 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    command: [ "./deploy.sh" ]
-    ports:
-      - "127.0.0.1:8000:8000" # Only bind to localhost for security
-
+    command: ["./deploy.sh"]
+    expose:
+      - "8000"                     # internal only — Caddy proxies via the compose network
     volumes:
       - logs_data:/app/logs
     healthcheck:
-      test: [ "CMD", "python3", "./docker-health-check.py" ]
+      test: ["CMD", "python3", "./docker-health-check.py"]
       interval: 30s
       timeout: 120s
       retries: 5
@@ -57,7 +82,7 @@ services:
     volumes:
       - logs_data:/app/logs
     healthcheck:
-      test: [ "CMD-SHELL", "celery -A afinance inspect ping -d celery@$${HOSTNAME} || exit 1" ]
+      test: ["CMD-SHELL", "celery -A afinance inspect ping -d celery@$${HOSTNAME} || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -84,7 +109,8 @@ services:
       - no-new-privileges:true
 
 volumes:
+  caddy_data:    # persists TLS certs across container restarts
+  caddy_config:
+  caddy_logs:
   redis_data:
   logs_data:
-
-    # docker pull acerschoolapp/acerschoolfinanceapp:latest && docker compose -f compose.prod.yaml up
