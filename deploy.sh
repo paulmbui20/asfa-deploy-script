@@ -231,7 +231,10 @@ gather_config() {
         print_info "Current SSL: $SETUP_SSL"
         read -p "Keep existing SSL config? [Y/n]: " KEEP_SSL
         KEEP_SSL=${KEEP_SSL:-Y}
-        [[ ! "$KEEP_SSL" =~ ^[Yy]$ ]] && configure_ssl_option
+        # FIX: use if statement instead of [[ ]] && to avoid set -e false-positive exit
+        if [[ ! "$KEEP_SSL" =~ ^[Yy]$ ]]; then
+            configure_ssl_option
+        fi
     else
         configure_ssl_option
     fi
@@ -247,7 +250,11 @@ gather_config() {
 
     read -p "Proceed with installation? [Y/n]: " CONFIRM
     CONFIRM=${CONFIRM:-Y}
-    [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && { print_info "Cancelled."; exit 0; }
+    # FIX: use if statement instead of [[ ]] && to avoid set -e false-positive exit
+    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+        print_info "Cancelled."
+        exit 0
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -907,7 +914,10 @@ main() {
 
     read -p "Start application now? [Y/n]: " START_NOW
     START_NOW=${START_NOW:-Y}
-    [[ "$START_NOW" =~ ^[Yy]$ ]] && start_application
+    # FIX: use if statement instead of [[ ]] && to avoid set -e false-positive exit
+    if [[ "$START_NOW" =~ ^[Yy]$ ]]; then
+        start_application
+    fi
 
     print_completion
 }
