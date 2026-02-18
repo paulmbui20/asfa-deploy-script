@@ -123,29 +123,23 @@ remove_host_nginx() {
 configure_ssl_option() {
     echo
     print_info "SSL / TLS Configuration"
-    echo "  1) Automatic HTTPS via Caddy + Let's Encrypt (requires valid public domain)"
-    echo "  2) Cloudflare proxy (Caddy listens on HTTP only; Cloudflare handles TLS)"
+    echo "  1) Automatic HTTPS — Caddy obtains & renews Let's Encrypt certs for you"
+    echo "     (requires a public domain with a DNS A record pointing to this server)"
+    echo "  2) Cloudflare proxy — Caddy listens on HTTP only; Cloudflare provides HTTPS"
     read -p "Select option [1/2]: " SSL_OPTION
     SSL_OPTION=${SSL_OPTION:-1}
 
     if [ "$SSL_OPTION" = "1" ]; then
         SETUP_SSL="letsencrypt"
-        if [ -n "$SSL_EMAIL" ]; then
-            read -p "Email for Let's Encrypt [$SSL_EMAIL]: " NEW_SSL_EMAIL
-            SSL_EMAIL=${NEW_SSL_EMAIL:-$SSL_EMAIL}
-        else
-            read -p "Email for Let's Encrypt: " SSL_EMAIL
-            while [ -z "$SSL_EMAIL" ]; do
-                print_warning "Email cannot be empty"
-                read -p "Email for Let's Encrypt: " SSL_EMAIL
-            done
-        fi
-        print_info "Caddy will obtain and auto-renew the certificate automatically."
-        print_warning "Make sure DNS A record: $DOMAIN_NAME → [this server's IP]"
+        SSL_EMAIL=""   # Caddy manages certs fully — no email required
+        print_success "Mode: Automatic HTTPS (Caddy + Let's Encrypt)"
+        print_info  "Caddy will obtain and auto-renew the certificate — nothing else needed."
+        print_warning "Ensure your DNS A record points $DOMAIN_NAME to this server's IP before starting."
     else
         SETUP_SSL="cloudflare"
         SSL_EMAIL=""
-        print_info "Caddy will listen on HTTP only. Set Cloudflare SSL/TLS mode to 'Flexible'."
+        print_success "Mode: HTTP only (Cloudflare handles TLS)"
+        print_info "Set Cloudflare SSL/TLS encryption mode to 'Flexible' in the Cloudflare dashboard."
     fi
 }
 
@@ -249,7 +243,6 @@ gather_config() {
     echo "  Deployer user:   ${CREATE_USER:-n}"
     echo "  Firewall:        ${SETUP_FIREWALL:-n}"
     echo "  SSL:             $SETUP_SSL"
-    [ "$SETUP_SSL" = "letsencrypt" ] && echo "  SSL Email:       $SSL_EMAIL"
     echo
 
     read -p "Proceed with installation? [Y/n]: " CONFIRM
@@ -511,42 +504,9 @@ EOF
 write_compose_file() {
     print_header "Generating compose.prod.yaml"
 
-    # Determine Caddy ports
-    if [ "$SETUP_SSL" = "letsencrypt" ]; then
-        CADDY_PORTS='"80:80"\n      - "443:443"\n      - "443:443/udp"'
-    else
-        CADDY_PORTS='"80:80"'
-    fi
-
-    cat > "$APP_DIR/compose.prod.yaml" << EOF
-# =============================================================
-# Docker Compose — Production (Caddy + Django + Redis)
-# =============================================================
-
-services:
-
-  # ----- Caddy reverse proxy -----
-  caddy:
-    image: caddy:latest          # always tracks the latest stable release
-    container_name: asfa_caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-$([ "$SETUP_SSL" = "letsencrypt" ] && echo '      - "443:443"' && echo '      - "443:443/udp"')
-    volumes:
-      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro   # your config
-      - caddy_data:/data                              # certs & ACME state
-      - caddy_config:/config                          # Caddy runtime config
-      - caddy_logs:/var/log/caddy                     # access logs
-    networks:
-      - asfa_net
-    depends_on:
-      - web
-    # ---- Debugging tip ----------------------------------------
-    # Tail Caddy logs:  docker compose -f compose.prod.yaml logs -f caddy
-    # Reload config:    docker compose -f compose.prod.yaml exec caddy caddy reload --config /etc/caddy/Caddyfile
-    # Check certs:      docker compose -f compose.prod.yaml exec caddy caddy list-certificates
-    # -----------------------------------------------------------
+    # Shared bottom section written once to avoid duplication
+    _write_compose_bottom() {
+        cat >> "$APP_DIR/compose.prod.yaml" << 'EOF'
 
   # ----- Django application -----
   web:
@@ -563,10 +523,9 @@ $([ "$SETUP_SSL" = "letsencrypt" ] && echo '      - "443:443"' && echo '      - 
       - asfa_net
     expose:
       - "8000"
-    # ---- Debugging tip ----------------------------------------
-    # Shell into Django:  docker compose -f compose.prod.yaml exec web bash
-    # Django management:  docker compose -f compose.prod.yaml exec web python manage.py <cmd>
-    # -----------------------------------------------------------
+    # Debugging:
+    #   shell:      docker compose -f compose.prod.yaml exec web bash
+    #   management: docker compose -f compose.prod.yaml exec web python manage.py <cmd>
 
   # ----- Redis -----
   redis:
@@ -577,9 +536,8 @@ $([ "$SETUP_SSL" = "letsencrypt" ] && echo '      - "443:443"' && echo '      - 
       - redis_data:/data
     networks:
       - asfa_net
-    # ---- Debugging tip ----------------------------------------
-    # Redis CLI:  docker compose -f compose.prod.yaml exec redis redis-cli
-    # -----------------------------------------------------------
+    # Debugging:
+    #   redis-cli:  docker compose -f compose.prod.yaml exec redis redis-cli
 
 volumes:
   caddy_data:    # persists TLS certificates across restarts
@@ -591,6 +549,77 @@ networks:
   asfa_net:
     driver: bridge
 EOF
+    }
+
+    if [ "$SETUP_SSL" = "letsencrypt" ]; then
+        # Ports 80 + 443 (TCP + UDP for HTTP/3)
+        cat > "$APP_DIR/compose.prod.yaml" << 'EOF'
+# =============================================================
+# Docker Compose — Production (Caddy auto-HTTPS + Django + Redis)
+# =============================================================
+
+services:
+
+  # ----- Caddy reverse proxy (automatic HTTPS via Let's Encrypt) -----
+  caddy:
+    image: caddy:latest
+    container_name: asfa_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - asfa_net
+    depends_on:
+      - web
+    # Debugging:
+    #   logs:        docker compose -f compose.prod.yaml logs -f caddy
+    #   hot-reload:  docker compose -f compose.prod.yaml exec caddy caddy reload --config /etc/caddy/Caddyfile
+    #   list certs:  docker compose -f compose.prod.yaml exec caddy caddy list-certificates
+    #   validate:    docker compose -f compose.prod.yaml exec caddy caddy validate --config /etc/caddy/Caddyfile
+EOF
+    else
+        # Cloudflare mode — port 80 only
+        cat > "$APP_DIR/compose.prod.yaml" << 'EOF'
+# =============================================================
+# Docker Compose — Production (Caddy HTTP-only + Django + Redis)
+# Cloudflare sits in front and provides HTTPS.
+# Set Cloudflare SSL/TLS mode to "Flexible".
+# =============================================================
+
+services:
+
+  # ----- Caddy reverse proxy (HTTP only — Cloudflare handles TLS) -----
+  caddy:
+    image: caddy:latest
+    container_name: asfa_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - asfa_net
+    depends_on:
+      - web
+    # Debugging:
+    #   logs:       docker compose -f compose.prod.yaml logs -f caddy
+    #   hot-reload: docker compose -f compose.prod.yaml exec caddy caddy reload --config /etc/caddy/Caddyfile
+    #   validate:   docker compose -f compose.prod.yaml exec caddy caddy validate --config /etc/caddy/Caddyfile
+EOF
+    fi
+
+    # Append shared services / volumes / networks
+    _write_compose_bottom
 
     print_success "compose.prod.yaml written"
 }
