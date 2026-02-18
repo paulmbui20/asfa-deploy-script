@@ -82,38 +82,69 @@ EOF
 # ---------------------------------------------------------------------------
 
 remove_host_nginx() {
-    print_header "Removing / Disabling Host Nginx"
+    print_header "Freeing Ports 80 & 443"
 
+    # ── 1. Stop host Nginx ──────────────────────────────────────────────────
     if systemctl is-active --quiet nginx 2>/dev/null; then
         print_warning "Nginx is running — stopping it..."
         sudo systemctl stop nginx
     fi
-
     if systemctl is-enabled --quiet nginx 2>/dev/null; then
         sudo systemctl disable nginx
-        print_success "Nginx disabled from startup"
+        print_success "Nginx service disabled"
     fi
-
-    # Release port 80/443 so Caddy (in Docker) can bind them
     if dpkg -l nginx 2>/dev/null | grep -q '^ii'; then
         print_info "Purging nginx packages..."
         sudo apt-get purge -y nginx nginx-common nginx-core nginx-full 2>/dev/null || true
         sudo apt-get autoremove -y
         print_success "Nginx purged"
     else
-        print_info "Nginx package not found — nothing to purge"
+        print_info "Nginx package not installed — skipping purge"
     fi
 
-    # Extra safety: kill anything still on 80/443
-    for PORT in 80 443; do
-        PID=$(sudo lsof -ti tcp:"$PORT" 2>/dev/null || true)
-        if [ -n "$PID" ]; then
-            print_warning "Port $PORT still in use by PID $PID — killing..."
-            sudo kill -9 $PID 2>/dev/null || true
+    # ── 2. Stop Coolify containers (they bind 80/443) ───────────────────────
+    if command -v docker &>/dev/null; then
+        COOLIFY_CONTAINERS=$(docker ps --filter "label=com.docker.compose.project=coolify" -q 2>/dev/null || true)
+        if [ -n "$COOLIFY_CONTAINERS" ]; then
+            print_warning "Coolify containers detected — stopping them to free ports..."
+            docker stop $COOLIFY_CONTAINERS
+            print_success "Coolify containers stopped"
+        else
+            print_info "Checking for any Docker containers holding ports 80/443..."
+            for PORT in 80 443; do
+                CONTAINER=$(docker ps --format '{{.ID}} {{.Ports}}' 2>/dev/null \
+                    | grep "0.0.0.0:${PORT}->" \
+                    | awk '{print $1}' || true)
+                if [ -n "$CONTAINER" ]; then
+                    print_warning "Container $CONTAINER is using port $PORT — stopping..."
+                    docker stop $CONTAINER || true
+                fi
+            done
         fi
+    fi
+
+    # ── 3. Hard-kill anything still holding 80/443 ──────────────────────────
+    for PORT in 80 443; do
+        while IFS= read -r PID; do
+            [ -z "$PID" ] && continue
+            print_warning "Port $PORT still held by PID $PID — force-killing..."
+            sudo kill -9 "$PID" 2>/dev/null || true
+        done < <(sudo lsof -ti tcp:"$PORT" 2>/dev/null || true)
     done
 
-    print_success "Host Nginx removed — ports 80 and 443 are free"
+    # ── 4. Confirm ports are clear ──────────────────────────────────────────
+    STILL_BUSY=""
+    for PORT in 80 443; do
+        if sudo lsof -ti tcp:"$PORT" &>/dev/null 2>&1; then
+            STILL_BUSY="$STILL_BUSY $PORT"
+        fi
+    done
+    if [ -n "$STILL_BUSY" ]; then
+        print_error "Could not free port(s):$STILL_BUSY — please free them manually and re-run."
+        exit 1
+    fi
+
+    print_success "Ports 80 and 443 are free"
 }
 
 # ---------------------------------------------------------------------------
@@ -231,10 +262,7 @@ gather_config() {
         print_info "Current SSL: $SETUP_SSL"
         read -p "Keep existing SSL config? [Y/n]: " KEEP_SSL
         KEEP_SSL=${KEEP_SSL:-Y}
-        # FIX: use if statement instead of [[ ]] && to avoid set -e false-positive exit
-        if [[ ! "$KEEP_SSL" =~ ^[Yy]$ ]]; then
-            configure_ssl_option
-        fi
+        [[ ! "$KEEP_SSL" =~ ^[Yy]$ ]] && configure_ssl_option
     else
         configure_ssl_option
     fi
@@ -250,11 +278,7 @@ gather_config() {
 
     read -p "Proceed with installation? [Y/n]: " CONFIRM
     CONFIRM=${CONFIRM:-Y}
-    # FIX: use if statement instead of [[ ]] && to avoid set -e false-positive exit
-    if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-        print_info "Cancelled."
-        exit 0
-    fi
+    [[ ! "$CONFIRM" =~ ^[Yy]$ ]] && { print_info "Cancelled."; exit 0; }
 }
 
 # ---------------------------------------------------------------------------
@@ -914,10 +938,7 @@ main() {
 
     read -p "Start application now? [Y/n]: " START_NOW
     START_NOW=${START_NOW:-Y}
-    # FIX: use if statement instead of [[ ]] && to avoid set -e false-positive exit
-    if [[ "$START_NOW" =~ ^[Yy]$ ]]; then
-        start_application
-    fi
+    [[ "$START_NOW" =~ ^[Yy]$ ]] && start_application
 
     print_completion
 }
