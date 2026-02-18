@@ -11,12 +11,12 @@
 
 :80 {
 
-    # ── Logging ────────────────────────────────────────────────────────────
+    # ── Logging (site-level — applies to all requests) ─────────────────────
     log {
         output file /var/log/caddy/access.log {
             roll_size     100mb
             roll_keep     5
-            roll_keep_for 720h   # 30 days
+            roll_keep_for 720h
         }
         format json
         level  INFO
@@ -32,25 +32,21 @@
         X-XSS-Protection       "1; mode=block"
         Referrer-Policy        "strict-origin-when-cross-origin"
         Permissions-Policy     "geolocation=(), microphone=(), camera=()"
-        -Server                # hide Caddy version
+        -Server
     }
 
-    # ── Health check (no auth, no logging) ─────────────────────────────────
+    # ── Health check ───────────────────────────────────────────────────────
     handle /health/ {
         reverse_proxy web:8000 {
             header_up Host            {host}
             header_up X-Real-IP       {http.request.header.CF-Connecting-IP}
             header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
         }
-        log {
-            output discard
-        }
     }
 
-    # ── Main reverse proxy ─────────────────────────────────────────────────
+    # ── Main reverse proxy (catch-all) ─────────────────────────────────────
     handle {
         reverse_proxy web:8000 {
-            # Restore real visitor IP from Cloudflare header
             header_up Host              {host}
             header_up X-Real-IP         {http.request.header.CF-Connecting-IP}
             header_up X-Forwarded-For   {http.request.header.CF-Connecting-IP}
@@ -60,7 +56,6 @@
             header_up Connection {http.request.header.Connection}
             header_up Upgrade    {http.request.header.Upgrade}
 
-            # Timeouts — generous for long Django requests / file uploads
             transport http {
                 dial_timeout            10s
                 response_header_timeout 600s
